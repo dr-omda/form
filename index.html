@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="en" dir="rtl">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -81,6 +81,7 @@ form{padding:4px 26px 26px}
 h2{font-size:1.5rem;font-weight:900;line-height:1.3}
 .sub{color:var(--mut);font-size:.9rem;margin-top:-14px}
 label,.lbl{display:block;font-weight:700;font-size:.92rem;margin-bottom:7px}
+label small.opt,.lbl small.opt{font-weight:600;font-size:.78rem;color:var(--mut)}
 .fw{position:relative}
 input[type=text],input[type=tel],textarea{width:100%;font:inherit;font-size:1rem;color:var(--ink);background:var(--fld);border:2px solid var(--line);border-radius:14px;padding:13px 15px;outline:none;transition:border-color .15s,box-shadow .15s,background .15s}
 input::placeholder,textarea::placeholder{color:var(--mut);opacity:.7}
@@ -95,6 +96,19 @@ input:focus,textarea:focus{border-color:var(--brand);background:var(--card);box-
 .msg{color:var(--err);font-size:.82rem;font-weight:600;margin-top:5px}
 .hi{background:linear-gradient(135deg,rgba(20,121,201,.12),rgba(255,122,61,.14));border:1px dashed var(--brand);border-radius:14px;padding:10px 14px;font-weight:700;font-size:.95rem;display:none}
 .hi.on{display:block;animation:in .3s}
+
+/* searchable select */
+.cb input{padding-inline-start:44px;padding-inline-end:42px;cursor:text}
+.cb .arrow{position:absolute;inset-inline-end:8px;top:50%;translate:0 -50%;width:34px;height:34px;border:0;border-radius:10px;background:transparent;color:var(--mut);font-size:1.05rem;cursor:pointer;display:grid;place-items:center;transition:transform .2s}
+.cb.open .arrow{transform:translateY(-50%) rotate(180deg)}
+.cb-list{position:absolute;inset-inline:0;top:calc(100% + 6px);z-index:8;max-height:240px;overflow-y:auto;overscroll-behavior:contain;list-style:none;padding:6px;background:var(--card);border:2px solid var(--brand);border-radius:14px;box-shadow:0 18px 40px -12px rgba(10,61,117,.4);display:none}
+.cb.open .cb-list{display:block;animation:in .2s}
+.cb-list li{padding:10px 14px;border-radius:10px;font-weight:700;font-size:.97rem;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.cb-list li.act{background:var(--fld);color:var(--brand)}
+.cb-list li.sel{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff}
+.cb-list li.sel::after{content:"✓"}
+.cb-list li.none{color:var(--mut);cursor:default;font-weight:600;justify-content:center}
+.cb-list mark{background:rgba(255,122,61,.28);color:inherit;border-radius:4px;padding:0 1px}
 
 /* chips */
 .chips{display:flex;flex-wrap:wrap;gap:9px}
@@ -250,9 +264,18 @@ input:focus,textarea:focus{border-color:var(--brand);background:var(--card);box-
           </div>
         </div>
         <div>
-          <label for="addr">🏠 العنوان بالتفصيل</label>
+          <label for="gov">🏠 المحافظة</label>
+          <div class="fw cb" id="cb">
+            <input type="text" id="gov" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="govList" autocomplete="off" placeholder="ابحث أو اختر محافظتك">
+            <span class="ok">✓</span>
+            <button type="button" class="arrow" id="govArrow" tabindex="-1" aria-label="عرض المحافظات">▾</button>
+            <ul class="cb-list" id="govList" role="listbox"></ul>
+          </div>
+          <div class="msg" id="e-gov"></div>
+        </div>
+        <div>
+          <label for="addr">📍 تفاصيل العنوان <small class="opt">(اختياري)</small></label>
           <textarea id="addr" placeholder="المدينة / الحي / الشارع"></textarea>
-          <div class="msg" id="e-addr"></div>
         </div>
       </section>
 
@@ -341,6 +364,101 @@ input:focus,textarea:focus{border-color:var(--brand);background:var(--card);box-
   function mark(id){var el=$(id),w=el.parentNode;w.classList.toggle('good',phRe.test(el.value))}
   ['ph','pp'].forEach(function(id){$(id).addEventListener('input',function(){this.value=digits(this.value).slice(0,11);mark(id)})});
 
+  // ===== المحافظات (اختيار مع بحث) =====
+  var GOVS=['القاهرة','الجيزة','الإسكندرية','القليوبية','الشرقية','الدقهلية','البحيرة','الغربية','المنوفية','كفر الشيخ','دمياط','بورسعيد','الإسماعيلية','السويس','شمال سيناء','جنوب سيناء','الفيوم','بني سويف','المنيا','أسيوط','سوهاج','قنا','الأقصر','أسوان','البحر الأحمر','الوادي الجديد','مطروح'];
+  var govVal='',hiIdx=-1,shown=[];
+  var gIn=$('gov'),gBox=$('cb'),gList=$('govList');
+  function norm(t){
+    return String(t).replace(/[\u064B-\u065F\u0670\u0640]/g,'').replace(/[أإآٱ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي').replace(/ؤ/g,'و').replace(/ئ/g,'ي').replace(/\s+/g,' ').trim().toLowerCase();
+  }
+  // يلوّن الجزء المطابق للبحث داخل الاسم
+  function lit(name,q){
+    if(!q)return esc(name);
+    var n=norm(name),k=n.indexOf(q);
+    // التطبيع بيحافظ على نفس الأطوال، فنقدر نقص الاسم الأصلي بنفس المواضع
+    if(k<0||n.length!==name.length)return esc(name);
+    return esc(name.slice(0,k))+'<mark>'+esc(name.slice(k,k+q.length))+'</mark>'+esc(name.slice(k+q.length));
+  }
+  function renderGov(q){
+    var nq=norm(q||'');
+    shown=GOVS.filter(function(g){return !nq||norm(g).indexOf(nq)>-1});
+    if(!shown.length){gList.innerHTML='<li class="none">مفيش محافظة بالاسم ده</li>';hiIdx=-1;return}
+    gList.innerHTML=shown.map(function(g,i){
+      return '<li role="option" id="gv'+i+'" data-i="'+i+'"'+(g===govVal?' class="sel" aria-selected="true"':'')+'>'+'<span>'+lit(g,nq)+'</span></li>';
+    }).join('');
+    var selIdx=shown.indexOf(govVal);
+    setHi(nq?0:(selIdx>-1?selIdx:-1),true);
+  }
+  function setHi(i,scroll){
+    var items=gList.querySelectorAll('li[data-i]');
+    items.forEach(function(li){li.classList.remove('act')});
+    hiIdx=i;
+    if(i>-1&&items[i]){
+      items[i].classList.add('act');
+      gIn.setAttribute('aria-activedescendant',items[i].id);
+      if(scroll)items[i].scrollIntoView({block:'nearest'});
+    }else gIn.removeAttribute('aria-activedescendant');
+  }
+  function openGov(q){
+    renderGov(q);
+    gBox.classList.add('open');gIn.setAttribute('aria-expanded','true');
+  }
+  function closeGov(){gBox.classList.remove('open');gIn.setAttribute('aria-expanded','false')}
+  function setGood(){gBox.classList.toggle('good',!!govVal)}
+  function pick(v){
+    govVal=v;gIn.value=v;setGood();closeGov();
+    $('e-gov').textContent='';gIn.classList.remove('bad');
+    buzz(8);
+    save();
+  }
+  gIn.addEventListener('focus',function(){openGov('');setTimeout(function(){gIn.select()},0)});
+  gIn.addEventListener('click',function(){if(!gBox.classList.contains('open'))openGov('')});
+  gIn.addEventListener('input',function(){
+    govVal='';setGood();
+    openGov(gIn.value);
+  });
+  gIn.addEventListener('keydown',function(e){
+    var open=gBox.classList.contains('open');
+    if(e.key==='ArrowDown'){e.preventDefault();if(!open)openGov(govVal?'':gIn.value);else if(shown.length)setHi((hiIdx+1)%shown.length,true)}
+    else if(e.key==='ArrowUp'){e.preventDefault();if(open&&shown.length)setHi((hiIdx-1+shown.length)%shown.length,true)}
+    else if(e.key==='Enter'){
+      e.preventDefault();
+      if(open&&shown.length){pick(shown[hiIdx>-1?hiIdx:0])}
+      else if(govVal&&cur<3)$('next').click();
+    }
+    else if(e.key==='Escape'){if(open){e.stopPropagation();closeGov()}}
+    else if(e.key==='Tab'){closeGov()}
+  });
+  gIn.addEventListener('blur',function(){
+    setTimeout(function(){
+      if(!govVal){
+        var nq=norm(gIn.value);
+        if(nq){
+          var m=GOVS.filter(function(g){return norm(g)===nq});
+          if(!m.length){var p=GOVS.filter(function(g){return norm(g).indexOf(nq)>-1});if(p.length===1)m=p}
+          if(m.length)pick(m[0]);
+        }
+      }
+      closeGov();
+    },120);
+  });
+  // mousedown بدل click عشان الـ input ما يفقدش التركيز قبل الاختيار
+  gList.addEventListener('mousedown',function(e){
+    e.preventDefault();
+    var li=e.target.closest('li[data-i]');
+    if(li)pick(shown[+li.dataset.i]);
+  });
+  gList.addEventListener('mousemove',function(e){
+    var li=e.target.closest('li[data-i]');
+    if(li&&+li.dataset.i!==hiIdx)setHi(+li.dataset.i,false);
+  });
+  $('govArrow').addEventListener('mousedown',function(e){
+    e.preventDefault();
+    if(gBox.classList.contains('open'))closeGov();else{gIn.focus();openGov('')}
+  });
+  document.addEventListener('mousedown',function(e){if(!gBox.contains(e.target))closeGov()});
+  document.addEventListener('touchstart',function(e){if(!gBox.contains(e.target))closeGov()},{passive:true});
+
   // ترحيب بالاسم
   var AR=/[\u0600-\u06FF]/;
   function greet(){
@@ -370,7 +488,7 @@ input:focus,textarea:focus{border-color:var(--brand);background:var(--card);box-
       ok=err('ph',phRe.test($('ph').value)?'':'الرقم لازم 11 رقم ويبدأ بـ 01.')&&ok;
       var p=phRe.test($('pp').value)?($('pp').value===$('ph').value?'رقم ولي الأمر لازم يختلف عن رقمك.':''):'الرقم لازم 11 رقم ويبدأ بـ 01.';
       ok=err('pp',p)&&ok;
-      ok=err('addr',$('addr').value.trim().length<6?'اكتب العنوان بالتفصيل.':'')&&ok;
+      ok=err('gov',govVal?'':'اختر المحافظة من القائمة.')&&ok;
       return ok;
     },
     function(){return true}
@@ -400,15 +518,20 @@ input:focus,textarea:focus{border-color:var(--brand);background:var(--card);box-
   };
   $('back').onclick=function(){show(cur-1)};
   document.querySelectorAll('input[type=text],input[type=tel]').forEach(function(i){
+    if(i.id==='gov')return;
     i.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();if(cur<3)$('next').click()}});
   });
 
+  function fullAddr(){
+    var d=$('addr').value.trim();
+    return govVal+(d?' - '+d:'');
+  }
   function data(){
     return [['الاسم',$('fullName').value.trim()],['المادة',subs().join(' + ')],['السنة الدراسية',val('year')],['نوع التعليم',val('edu')],
       ['نوع الحجز',online?'أونلاين':'سنتر - '+val('loc')],['رقم الهاتف',$('ph').value],
-      ['رقم ولي الأمر',$('pp').value],['العنوان',$('addr').value.trim()]];
+      ['رقم ولي الأمر',$('pp').value],['العنوان',fullAddr()]];
   }
-  function esc(t){return t.replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+  function esc(t){return String(t).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
   var ico=['👤','🧪','🎓','📚','📍','📞','👨‍👩‍👦','🏠'];
   function summary(){
     var first=$('fullName').value.trim().split(/\s+/)[0];
@@ -418,11 +541,12 @@ input:focus,textarea:focus{border-color:var(--brand);background:var(--card);box-
 
   // حفظ تلقائي للمسودة
   var KEY='chem-draft';
-  function save(){try{localStorage.setItem(KEY,JSON.stringify({s:subs(),n:$('fullName').value,y:val('year'),e:val('edu'),b:val('bk'),l:val('loc'),p:$('ph').value,q:$('pp').value,a:$('addr').value}))}catch(e){}}
+  function save(){try{localStorage.setItem(KEY,JSON.stringify({s:subs(),n:$('fullName').value,y:val('year'),e:val('edu'),b:val('bk'),l:val('loc'),p:$('ph').value,q:$('pp').value,g:govVal,a:$('addr').value}))}catch(e){}}
   function restore(){
     var d=null;try{d=JSON.parse(localStorage.getItem(KEY)||'null')}catch(e){}
     if(!d)return;
     $('fullName').value=d.n||'';$('ph').value=d.p||'';$('pp').value=d.q||'';$('addr').value=d.a||'';
+    if(d.g&&GOVS.indexOf(d.g)>-1){govVal=d.g;gIn.value=d.g;setGood()}
     [['year',d.y],['edu',d.e],['bk',d.b],['loc',d.l]].forEach(function(p){
       if(!p[1])return;
       document.querySelectorAll('input[name="'+p[0]+'"]').forEach(function(r){if(r.value===p[1])r.checked=true});
@@ -470,6 +594,7 @@ input:focus,textarea:focus{border-color:var(--brand);background:var(--card);box-
   });
   function close(){
     $('modal').classList.remove('on');$('form').reset();
+    govVal='';setGood();closeGov();
     try{localStorage.removeItem(KEY)}catch(e){}
     bk();applySub();greet();mark('ph');mark('pp');
     document.querySelectorAll('.bad').forEach(function(x){x.classList.remove('bad')});
